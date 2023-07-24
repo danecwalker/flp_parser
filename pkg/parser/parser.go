@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 
 	"github.com/danecwalker/flp-parser/pkg/defs"
 )
@@ -81,7 +83,7 @@ func (bi *ByteIterator) ReadEvent() defs.Event {
 			i++
 		}
 
-		ev := defs.NewTextEvent(kind, string(bi.b[bi.i:bi.i+int(vLen)]))
+		ev := defs.NewTextEvent(kind, uint8(i), string(bi.b[bi.i:bi.i+int(vLen)]))
 		bi.i += int(vLen)
 		return ev
 	} else {
@@ -90,56 +92,145 @@ func (bi *ByteIterator) ReadEvent() defs.Event {
 }
 
 // checkHeader checks the header of the given byte slice
-func parseHeader(b *ByteIterator) (string, error) {
+func parseHeader(b *ByteIterator) (*defs.Header, error) {
+	var H = defs.Header{}
+
 	// check first 4 bytes for "FLhd"
-	magic := dwordToString(b.NextDWord())
-	if magic != "FLhd" {
-		return "", fmt.Errorf("invalid file header")
+	m := b.NextDWord()
+	magic := dwordToString(m)
+	if magic != defs.F_SIG {
+		return nil, fmt.Errorf("invalid file header")
 	}
+	H.FSig = m
 
 	lenNext := b.NextDWord()
 	if lenNext != 6 {
-		return "", fmt.Errorf("invalid file header")
+		return nil, fmt.Errorf("invalid file header")
 	}
+	H.ChunkSize = lenNext
 
-	b.NextWord()
-	b.NextWord()
-	b.NextWord()
+	H.Format = b.NextWord()
+	H.NChannels = b.NextWord()
+	H.BeatDivPerQNote = b.NextWord()
 
-	dataChunk := dwordToString(b.NextDWord())
-	if dataChunk != "FLdt" {
-		return "", fmt.Errorf("invalid file header")
+	d := b.NextDWord()
+	dataChunk := dwordToString(d)
+	if dataChunk != defs.F_DAT {
+		return nil, fmt.Errorf("invalid file header")
 	}
+	H.FDat = d
 
-	b.NextDWord()
+	H.FDatChunkSize = b.NextDWord()
 
-	versionEvent := b.ReadEvent()
-	if versionEvent.Kind() != defs.EventKindFLP_Version {
-		return "", fmt.Errorf("invalid file header")
-	}
-
-	version := versionEvent.Content().(string)
-
-	return version, nil
+	return &H, nil
 }
 
 // Parse parses the given byte slice into a slice of events
-func Parse(b []byte) ([]defs.Event, error) {
+func Parse(b []byte) (*defs.Project, error) {
 	iter := ByteIterator{b: b, i: 0}
-	version, err := parseHeader(&iter)
+	proj := defs.Project{}
+	header, err := parseHeader(&iter)
+	proj.Header = header
 
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Println(version)
-
 	for iter.i < len(b) {
 		event := iter.ReadEvent()
-		if event.Kind() == defs.EventKindFilePath {
-			fmt.Println(event)
-		}
+		proj.Events = append(proj.Events, event)
 	}
 
-	return nil, nil
+	fmt.Printf("%+v\n", proj.Header)
+	fmt.Printf("%+v\n", len(proj.Events))
+
+	return &proj, nil
+}
+
+func WriteByte(b uint8, buf *bytes.Buffer) {
+	buf.WriteByte(b)
+}
+
+func WriteWord(w uint16, buf *bytes.Buffer) {
+	buf.WriteByte(byte(w))
+	buf.WriteByte(byte(w >> 8))
+}
+
+func WriteDWord(dw uint32, buf *bytes.Buffer) {
+	buf.WriteByte(byte(dw))
+	buf.WriteByte(byte(dw >> 8))
+	buf.WriteByte(byte(dw >> 16))
+	buf.WriteByte(byte(dw >> 24))
+}
+
+func WriteEvent(ev defs.Event, buf *bytes.Buffer) {
+	kind := ev.Kind()
+	WriteByte(kind, buf)
+
+	if kind <= 0x3F {
+		WriteByte(ev.Value().(uint8), buf)
+	} else if kind >= 0x40 && kind <= 0x7F {
+		WriteWord(ev.Value().(uint16), buf)
+	} else if kind >= 0x80 && kind <= 0xBF {
+		WriteDWord(ev.Value().(uint32), buf)
+	} else if kind >= 0xC0 && kind <= 0xFF {
+		v := ev.Value().(string)
+		vLen := uint32(len(v))
+		for {
+			b := byte(vLen & 0x7F)
+			vLen >>= 7
+			if vLen == 0 {
+				WriteByte(b, buf)
+				break
+			} else {
+				WriteByte(b|0x80, buf)
+			}
+		}
+
+		buf.WriteString(v)
+	} else {
+		panic("invalid event kind")
+	}
+}
+
+func Write(project *defs.Project, path string) error {
+
+	// Write header
+	buf := bytes.Buffer{}
+	WriteDWord(project.Header.FSig, &buf)
+	WriteDWord(project.Header.ChunkSize, &buf)
+	WriteWord(project.Header.Format, &buf)
+	WriteWord(project.Header.NChannels, &buf)
+	WriteWord(project.Header.BeatDivPerQNote, &buf)
+	WriteDWord(project.Header.FDat, &buf)
+	WriteDWord(project.Header.FDatChunkSize, &buf)
+
+	// Write events
+	for _, ev := range project.Events {
+		WriteEvent(ev, &buf)
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(path); os.IsExist(err) {
+		fmt.Println("File already exist")
+		return err
+	}
+
+	// Write to file
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Println("Error creating file")
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.Write(buf.Bytes())
+	if err != nil {
+		fmt.Println("Error writing to file")
+		return err
+	}
+
+	fmt.Println("Successfully wrote to file")
+
+	return nil
 }
