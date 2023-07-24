@@ -93,6 +93,5 @@ func ModTextEvent(ev *TextEvent, value string) {
 	fmt.Println(ev.sizeCount)
 	split := strings.Split(value, "")
 	j := strings.Join(split, "\x00") + "\x00" + strings.Repeat("\x00", int(ev.sizeCount)+1)
-	fmt.Println(strings.ReplaceAll(j, "\x00", "_"))
 	ev.value = j
 }

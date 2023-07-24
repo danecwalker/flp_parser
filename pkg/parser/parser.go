@@ -141,9 +141,6 @@ func Parse(b []byte) (*defs.Project, error) {
 		proj.Events = append(proj.Events, event)
 	}
 
-	fmt.Printf("%+v\n", proj.Header)
-	fmt.Printf("%+v\n", len(proj.Events))
-
 	return &proj, nil
 }
 
@@ -229,8 +226,6 @@ func Write(project *defs.Project, path string) error {
 		fmt.Println("Error writing to file")
 		return err
 	}
-
-	fmt.Println("Successfully wrote to file")
 
 	return nil
 }

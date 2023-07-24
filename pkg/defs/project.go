@@ -15,6 +15,7 @@ type Header struct {
 }
 
 type Project struct {
-	Header *Header
-	Events []Event
+	Header          *Header
+	Events          []Event
+	FLStudioFactory string
 }

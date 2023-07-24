@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/danecwalker/flp-parser/pkg/defs"
 	"github.com/danecwalker/flp-parser/pkg/parser"
@@ -44,12 +46,34 @@ func main() {
 		return
 	}
 
-	for _, e := range proj.Events {
-		switch e.Value().(type) {
-		case string:
-			if e.Kind() == defs.EventKindFilePath {
-				defs.ModTextEvent(e.(*defs.TextEvent), "C:\\Users\\danew\\Downloads\\looperman-l-2217571-0289398-emeralds-lil-uzi-vert.wav")
+	if proj.Events[0].Kind() != defs.EventKindFLP_Version {
+		fmt.Println("Error parsing file")
+		return
+	}
+
+	fmt.Println("FLP Version:", proj.Events[0].Value().(string))
+
+	// parser.ResolveFactory(proj)
+
+	for _, ev := range proj.Events[1:] {
+		switch ev.Kind() {
+		case defs.EventKindFilePath:
+			fmt.Println("File Path:", ev.Value().(string))
+			os.Mkdir("output", os.ModePerm)
+			f, err := os.Create("output/" + filepath.Base(strings.ReplaceAll(ev.Value().(string), "\x00", "")))
+			if err != nil {
+				fmt.Println("Error creating file", err)
+				continue
 			}
+
+			src, err := os.ReadFile(ev.Value().(string))
+			if err != nil {
+				fmt.Println("Error reading file")
+				continue
+			}
+
+			f.Write(src)
+			f.Close()
 		}
 	}
 
